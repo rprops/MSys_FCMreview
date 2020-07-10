@@ -1,0 +1,122 @@
+---
+title: <font size = "6">Demo of microbial fcm analysis pipeline</font>
+output:
+  html_document:
+    code_folding: show
+    highlight: haddock
+    keep_md: yes
+    theme: flatly
+    toc: yes
+    number_sections: true
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+      toc_depth: 4
+editor_options:
+  chunk_output_type: console
+---
+
+<style type="text/css">
+h1.title {
+  font-size: 38px;
+  color: black;
+  text-align: center;
+}
+
+</style>
+
+```{r setup-1, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, 
+                      echo = TRUE, 
+                      cache = FALSE, 
+                      include = TRUE, 
+                      collapse = FALSE, 
+                      dependson = NULL, 
+                      engine = "R", # Chunks will always have R code, unless noted
+                      error = TRUE,
+                      fig.path="./Figures/",  # Set the figure options
+                      fig.align = "center"
+                      )
+```
+
+# Libraries
+
+```{r, include=FALSE}
+library("Phenoflow")
+library("plyr")
+library("flowViz")
+library("dplyr")
+library("ggplot2")
+library("scales")
+library("plyr")
+library("cowplot")
+library("ggcyto")
+library("RColorBrewer")
+library("grid")
+library("tidyr")
+
+my.settings <- list(
+  strip.background = list(col = "transparent"),
+  strip.border = list(col = "transparent", cex = 5),
+  gate = list(
+  col = "black",
+  fill = "red",
+  alpha = 0.35,
+  border = NA,
+  lwd = 1
+  ),
+  panel.background = list(col = "lightgray"),
+  background = list(col = "white")
+  )
+
+# Set seed
+set.seed(777)
+```
+
+# Preprocessing
+
+## Import, normalize & denoise data
+
+```{r, include=TRUE}
+# Create a PolygonGate for denoising the dataset
+sqrcutWater<- matrix(c(7.25, 7.25, 14, 14,
+     2.5, 5.5, 13, 2.5),
+     ncol = 2,
+     nrow = 4)
+colnames(sqrcutWater) <- c("BL1-H", "BL3-H")
+polyGateWater <- polygonGate(.gate = sqrcutWater, filterId = "Total Cells")
+
+# Import & preprocess
+
+```
+
+## Extract metadata
+
+```{r, include=TRUE}
+# Create metadata from sample names
+
+```
+
+# Cell density assessment
+
+```{r, include=TRUE}
+
+```
+
+# Cell population identification
+
+```{r, include=TRUE}
+
+```
+
+# Cytometric fingerprinting
+
+```{r, include=TRUE}
+
+```
+
+# Conclusions
+
+```{r, include=TRUE}
+
+```
