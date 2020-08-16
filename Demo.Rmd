@@ -37,16 +37,17 @@ knitr::opts_chunk$set(eval = TRUE,
                       fig.path="./Figures/",  # Set the figure options
                       fig.align = "center"
                       )
+options(knitr.duplicate.label = "allow")
 ```
 
 # Libraries
 
-```{r, include=FALSE}
+```{r, include = TRUE, warning = FALSE, echo = FALSE, message = FALSE}
 library("Phenoflow")
 library("plyr")
-library("flowViz")
 library("dplyr")
 library("ggplot2")
+library("flowAI")
 library("scales")
 library("plyr")
 library("cowplot")
@@ -55,49 +56,220 @@ library("RColorBrewer")
 library("grid")
 library("tidyr")
 
-my.settings <- list(
-  strip.background = list(col = "transparent"),
-  strip.border = list(col = "transparent", cex = 5),
-  gate = list(
-  col = "black",
-  fill = "red",
-  alpha = 0.35,
-  border = NA,
-  lwd = 1
-  ),
-  panel.background = list(col = "lightgray"),
-  background = list(col = "white")
-  )
-
-# Set seed
+# Set seed for reproducible analysis
 set.seed(777)
 ```
 
 # Preprocessing
 
-## Import, normalize & denoise data
+## Import data 
+
+```{r, include = TRUE, cache = TRUE, cache.lazy = FALSE}
+# Import data
+flowData <- read.flowSet(path = "data/zishu_2018/")
+param <- c("FS Log", "SS Log","FL 4 Log")
+sampleNames(flowData) <- gsub(".5", "_5", sampleNames(flowData), fixed = TRUE)
+```
+
+## Transform data 
+
+```{r, include = TRUE, cache = TRUE, cache.lazy = FALSE}
+# Transform data
+flowData_transformed_log <- transform(flowData,`FS Log`=log10(`FS Log`),
+                                   `SS Log`=log10(`SS Log`),
+                                   `FL 4 Log`=log10(`FL 4 Log`))
+flowData_transformed_asinh <- transform(flowData,`FS Log`=asinh(`FS Log`),
+                                   `SS Log`=asinh(`SS Log`),
+                                   `FL 4 Log`=asinh(`FL 4 Log`))
+```
+
+## Denoise data - step 1 {.tabset}
+
+### Untransformed data 
+
+```{r, include=TRUE}
+r_sam <- sample(1:length(flowData), 6)
+
+#  scatter plot
+p_scatter1 <- ggcyto::ggcyto(flowData[r_sam], aes(x = `FS Log`, y = `FL 4 Log`)) + 
+  geom_hex(bins = 300) +
+  theme_bw()+
+  labs(x = "Forward scatter (a.u.)", y = "DAPI (a.u.)")+
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        strip.background = element_rect(colour="white", fill="white"),
+        panel.border = element_rect(colour = "white"))
+  # coord_cartesian(xlim = c(0,6), ylim = c(0,6))
+
+print(p_scatter1)
+
+```
+
+### Log-transformed data 
+
+```{r, include=TRUE}
+#  scatter plot
+p_scatter2 <- ggcyto::ggcyto(flowData_transformed_log[r_sam], aes(x = `FS Log`, y = `FL 4 Log`)) + 
+  geom_hex(bins = 300) +
+  theme_bw()+
+  labs(x = "Forward scatter (a.u.)", y = "DAPI (a.u.)")+
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        strip.background = element_rect(colour="white", fill="white"),
+        panel.border = element_rect(colour = "white"))
+  # coord_cartesian(xlim = c(0,6), ylim = c(0,6))
+
+print(p_scatter2)
+```
+
+### asinh-transformed data 
+
+```{r, include=TRUE}
+#  scatter plot
+p_scatter3 <- ggcyto::ggcyto(flowData_transformed_asinh[r_sam], aes(x = `FS Log`, y = `FL 4 Log`)) + 
+  geom_hex(bins = 300) +
+  theme_bw()+
+  labs(x = "Forward scatter (a.u.)", y = "DAPI (a.u.)")+
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        strip.background = element_rect(colour="white", fill="white"),
+        panel.border = element_rect(colour = "white"))
+  # coord_cartesian(xlim = c(0,6), ylim = c(0,6))
+
+print(p_scatter3)
+```
+
+## Denoise data - step 2 {.tabset}
+
+### Without gate
+
+```{r, include=TRUE}
+#  scatter plot
+p_scatter4 <- ggcyto::ggcyto(flowData_transformed_asinh[r_sam], aes(x = `FS Log`, y = `FL 4 Log`)) + 
+  geom_hex(bins = 300) +
+  theme_bw()+
+  labs(x = "Forward scatter (a.u.)", y = "DAPI (a.u.)")+
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        strip.background = element_rect(colour="white", fill="white"),
+        panel.border = element_rect(colour = "white"))
+  # coord_cartesian(xlim = c(0,6), ylim = c(0,6))
+
+print(p_scatter4)
+```
+
+### With gate
 
 ```{r, include=TRUE}
 # Create a PolygonGate for denoising the dataset
-sqrcutWater<- matrix(c(7.25, 7.25, 14, 14,
-     2.5, 5.5, 13, 2.5),
+polycut <- matrix(c(1.5, 1.5, 4, 4, 9, 9, 6.75, 6.75, 6.25, 6.25,
+  2.25, 6, 6, 8.75, 8.75, 2.25, 2.25, 2.75, 2.75, 2.25),
      ncol = 2,
-     nrow = 4)
-colnames(sqrcutWater) <- c("BL1-H", "BL3-H")
-polyGateWater <- polygonGate(.gate = sqrcutWater, filterId = "Total Cells")
+     nrow = 10)
+colnames(polycut) <- c("FS Log", "FL 4 Log")
+polyGate <- polygonGate(.gate = polycut, filterId = "Cell population")
 
-# Import & preprocess
+#  scatter plot
+p_scatter5 <- ggcyto::ggcyto(flowData_transformed_asinh[r_sam], aes(x = `FS Log`, y = `FL 4 Log`)) + 
+  geom_hex(bins = 300) +
+  theme_bw()+
+  labs(x = "Forward scatter (a.u.)", y = "DAPI (a.u.)")+
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        strip.background = element_rect(colour="white", fill="white"),
+        panel.border = element_rect(colour = "white"))+
+  # coord_cartesian(xlim = c(0,6), ylim = c(0,6))+
+  geom_gate(polyGate, col = "#CB0001", fill = "#ffa401", alpha = 0.8, size = 1)
+  
+print(p_scatter5)
 
+# Retain only events in gate
+flowData_transformed_asinh <- Subset(flowData_transformed_asinh, polyGate)
 ```
 
-## Extract metadata
+## Denoise data - step 3 {.tabset}
+
+### Before flowAI
 
 ```{r, include=TRUE}
-# Create metadata from sample names
+#  scatter plot
+p_scatter6 <- ggcyto::ggcyto(flowData_transformed_asinh[r_sam], aes(x = `TIME`, y = `FL 4 Log`)) + 
+  geom_hex(bins = 300) +
+  theme_bw()+
+  labs(x = "Time (ms)", y = "DAPI (a.u.)")+
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        strip.background = element_rect(colour="white", fill="white"),
+        panel.border = element_rect(colour = "white"))
 
+print(p_scatter6)
 ```
 
-# Cell density assessment
+### flowAI stats
+
+```{r, include=TRUE, message =  FALSE, echo = FALSE, warning = FALSE, cache = TRUE, cache.lazy = FALSE}
+ChExcludeFM <- 
+  colnames(flowData_transformed_asinh)[!colnames(flowData_transformed_asinh) %in% param]
+
+# Use flowAI for removing anomalies from the data
+flowData_transformed_asinh_dn <- flow_auto_qc(flowData_transformed_asinh, 
+  output = 1,
+  folder_results = "./data/QC_flowAI",
+  ChExcludeFM = ChExcludeFM,
+  timeCh = "TIME",
+  second_fractionFR = "timestep"
+  )
+```
+
+```{r, include=TRUE}
+QC_stats <- read.delim("./data/QC_flowAI/QCmini.txt")
+
+p_qc1 <- QC_stats %>%
+  arrange(-X..anomalies) %>% 
+  mutate(Name.file = factor(Name.file, levels = unique(Name.file))) %>% 
+  ggplot(., aes(y = X..anomalies, x = Name.file))+
+  geom_point(shape = 21, size = 3, fill = "#ffa401", alpha = 0.5)+
+  theme_bw()+
+  theme(axis.text = element_text(size = 12),
+    axis.text.x = element_blank(),
+        axis.title = element_text(size = 12))+
+  labs(y = "% anomalies",  x = "samples")+
+  geom_hline(yintercept = 5, linetype = 2)+
+  scale_y_continuous(breaks = seq(from = 0, to = 100, by = 10), limits = c(0,100))
+
+print(p_qc1)
+
+p_qc2 <- QC_stats %>% 
+  ggplot(., aes(x = X..anomalies))+
+  geom_histogram(fill = "#ffa401", alpha = 0.5, col = "black")+
+  theme_bw()+
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12))+
+  labs(x = "% anomalies",  y = "Number of samples")+
+  geom_vline(xintercept = median(QC_stats$X..anomalies), linetype = 2)
+
+print(p_qc2)
+
+cowplot::plot_grid(p_qc1, p_qc2, align = "hv")
+```
+
+### After flowAI 
+
+```{r, include=TRUE}
+#  scatter plot
+p_scatter7 <- ggcyto::ggcyto(flowData_transformed_asinh_dn[r_sam], aes(x = `TIME`, y = `FL 4 Log`)) + 
+  geom_hex(bins = 300) +
+  theme_bw()+
+  labs(x = "Time (ms)", y = "DAPI (a.u.)")+
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12),
+        strip.background = element_rect(colour="white", fill="white"),
+        panel.border = element_rect(colour = "white"))
+
+print(p_scatter7)
+```
+
+# Cell density measurement
 
 ```{r, include=TRUE}
 
@@ -119,4 +291,10 @@ polyGateWater <- polygonGate(.gate = sqrcutWater, filterId = "Total Cells")
 
 ```{r, include=TRUE}
 
+```
+
+# Session info
+
+```{r, include=TRUE}
+sessionInfo()
 ```
