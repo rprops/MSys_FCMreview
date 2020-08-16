@@ -42,7 +42,7 @@ options(knitr.duplicate.label = "allow")
 
 # Libraries
 
-```{r, include = TRUE, warning = FALSE, echo = FALSE, message = FALSE}
+```{r, include = TRUE, warning = FALSE, message = FALSE}
 library("Phenoflow")
 library("plyr")
 library("dplyr")
@@ -55,9 +55,18 @@ library("ggcyto")
 library("RColorBrewer")
 library("grid")
 library("tidyr")
+# library("Rphenograph")
+library("FlowSOM")
 
 # Set seed for reproducible analysis
 set.seed(777)
+
+# For avoiding verbose console output
+run_quiet <- function (x) {
+  sink(tempfile())
+  on.exit(sink())
+  invisible(force(x))
+}
 ```
 
 # Preprocessing
@@ -187,7 +196,12 @@ print(p_scatter5)
 flowData_transformed_asinh <- Subset(flowData_transformed_asinh, polyGate)
 ```
 
-## Denoise data - step 3 {.tabset}
+## Denoise data - step 3
+
+Doublet/clump removal not possible for this dataset due to lack of combined
+-A/-H parameters.
+
+## Denoise data - step 4 {.tabset}
 
 ### Before flowAI
 
@@ -205,52 +219,21 @@ p_scatter6 <- ggcyto::ggcyto(flowData_transformed_asinh[r_sam], aes(x = `TIME`, 
 print(p_scatter6)
 ```
 
-### flowAI stats
-
 ```{r, include=TRUE, message =  FALSE, echo = FALSE, warning = FALSE, cache = TRUE, cache.lazy = FALSE}
 ChExcludeFM <- 
   colnames(flowData_transformed_asinh)[!colnames(flowData_transformed_asinh) %in% param]
 
 # Use flowAI for removing anomalies from the data
-flowData_transformed_asinh_dn <- flow_auto_qc(flowData_transformed_asinh, 
+flowData_transformed_asinh_dn <- run_quiet(flow_auto_qc(flowData_transformed_asinh, 
   output = 1,
   folder_results = "./data/QC_flowAI",
   ChExcludeFM = ChExcludeFM,
   timeCh = "TIME",
   second_fractionFR = "timestep"
   )
-```
+)
 
-```{r, include=TRUE}
-QC_stats <- read.delim("./data/QC_flowAI/QCmini.txt")
-
-p_qc1 <- QC_stats %>%
-  arrange(-X..anomalies) %>% 
-  mutate(Name.file = factor(Name.file, levels = unique(Name.file))) %>% 
-  ggplot(., aes(y = X..anomalies, x = Name.file))+
-  geom_point(shape = 21, size = 3, fill = "#ffa401", alpha = 0.5)+
-  theme_bw()+
-  theme(axis.text = element_text(size = 12),
-    axis.text.x = element_blank(),
-        axis.title = element_text(size = 12))+
-  labs(y = "% anomalies",  x = "samples")+
-  geom_hline(yintercept = 5, linetype = 2)+
-  scale_y_continuous(breaks = seq(from = 0, to = 100, by = 10), limits = c(0,100))
-
-print(p_qc1)
-
-p_qc2 <- QC_stats %>% 
-  ggplot(., aes(x = X..anomalies))+
-  geom_histogram(fill = "#ffa401", alpha = 0.5, col = "black")+
-  theme_bw()+
-  theme(axis.text = element_text(size = 12),
-        axis.title = element_text(size = 12))+
-  labs(x = "% anomalies",  y = "Number of samples")+
-  geom_vline(xintercept = median(QC_stats$X..anomalies), linetype = 2)
-
-print(p_qc2)
-
-cowplot::plot_grid(p_qc1, p_qc2, align = "hv")
+# flowData_transformed_asinh_dn <- read.flowSet(path = "./data/QC_flowAI", pattern = "_QC.fcs")
 ```
 
 ### After flowAI 
@@ -269,16 +252,68 @@ p_scatter7 <- ggcyto::ggcyto(flowData_transformed_asinh_dn[r_sam], aes(x = `TIME
 print(p_scatter7)
 ```
 
+### QC stats
+
+```{r, include=TRUE}
+QC_stats <- read.delim("./data/QC_flowAI/QCmini.txt")
+
+p_qc1 <- QC_stats %>%
+  arrange(-X..anomalies) %>% 
+  mutate(Name.file = factor(Name.file, levels = unique(Name.file))) %>% 
+  ggplot(., aes(y = X..anomalies, x = Name.file))+
+  geom_point(shape = 21, size = 3, fill = "#ffa401", alpha = 0.5)+
+  theme_bw()+
+  theme(axis.text = element_text(size = 12),
+    axis.text.x = element_blank(),
+        axis.title = element_text(size = 12))+
+  labs(y = "% anomalies",  x = "Ranked samples")+
+  geom_hline(yintercept = 5, linetype = 2)
+
+p_qc2 <- QC_stats %>% 
+  ggplot(., aes(x = X..anomalies))+
+  geom_histogram(fill = "#ffa401", alpha = 0.5, col = "black")+
+  theme_bw()+
+  theme(axis.text = element_text(size = 12),
+        axis.title = element_text(size = 12))+
+  labs(x = "% anomalies",  y = "Number of samples")+
+  geom_vline(xintercept = median(QC_stats$X..anomalies), linetype = 2)+
+  scale_x_continuous(breaks = seq(from = 0, to = 100, by = 10), limits = c(-5,100))
+
+cowplot::plot_grid(p_qc1, p_qc2, align = "hv", ncol = 1)
+```
+
 # Cell density measurement
+
+Cell concentration cannot be estimated for this dataset due to lack of 
+volumetric measurement.
 
 ```{r, include=TRUE}
 
 ```
 
-# Cell population identification
+# Cell population identification {.tabset}
 
-```{r, include=TRUE}
+## FlowSOM - fig1
+```{r, include=TRUE, cache = TRUE, cache.lazy = TRUE, dpi = 500}
+fSOM <- FlowSOM(
+  input = flowData_transformed_asinh[1:3],
+  # Input options:
+  compensate = FALSE,
+  transform = FALSE,
+  scale = FALSE,
+  # SOM options:
+  colsToUse = param,
+  xdim = 7,
+  ydim = 7,
+  nClus = 10
+  )
 
+PlotStars(fSOM[[1]], backgroundValues = as.factor(fSOM[[2]]))
+```
+
+## FlowSOM - fig2
+```{r, include=TRUE, dpi = 500}
+PlotMarker(fSOM[[1]], param[3])
 ```
 
 # Cytometric fingerprinting
