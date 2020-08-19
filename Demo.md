@@ -11,7 +11,7 @@ output:
     toc_float:
       collapsed: no
       smooth_scroll: yes
-      toc_depth: 4
+      toc_depth: 3
 editor_options:
   chunk_output_type: console
 ---
@@ -43,7 +43,7 @@ library("ggcyto")
 library("RColorBrewer")
 library("grid")
 library("tidyr")
-# library("Rphenograph")
+library("flowFP")
 library("FlowSOM")
 
 # Set seed for reproducible analysis
@@ -303,7 +303,7 @@ volumetric measurement.
 
 ```r
 fSOM <- FlowSOM(
-  input = flowData_transformed_asinh[1:3],
+  input = flowData_transformed_asinh_dn[1:3],
   # Input options:
   compensate = FALSE,
   transform = FALSE,
@@ -331,6 +331,42 @@ PlotMarker(fSOM[[1]], param[3])
 # Cytometric fingerprinting
 
 
+```r
+fp_x <- flowFPModel(fcs = flowData_transformed_asinh_dn, parameters = param,
+  nRecursions = 8, sampleSize = 1e3, name = "Fingerprint")
+```
+
+```
+## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
+## model@split_axis[[level]], : converting NULL pointer to R NULL
+
+## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
+## model@split_axis[[level]], : converting NULL pointer to R NULL
+
+## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
+## model@split_axis[[level]], : converting NULL pointer to R NULL
+
+## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
+## model@split_axis[[level]], : converting NULL pointer to R NULL
+
+## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
+## model@split_axis[[level]], : converting NULL pointer to R NULL
+
+## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
+## model@split_axis[[level]], : converting NULL pointer to R NULL
+
+## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
+## model@split_axis[[level]], : converting NULL pointer to R NULL
+
+## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
+## model@split_axis[[level]], : converting NULL pointer to R NULL
+```
+
+```r
+plot(fp_x)
+```
+
+<img src="./Figures/unnamed-chunk-16-1.png" style="display: block; margin: auto;" />
 
 # Conclusions
 

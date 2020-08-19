@@ -11,7 +11,7 @@ output:
     toc_float:
       collapsed: no
       smooth_scroll: yes
-      toc_depth: 4
+      toc_depth: 3
 editor_options:
   chunk_output_type: console
 ---
@@ -55,8 +55,17 @@ library("ggcyto")
 library("RColorBrewer")
 library("grid")
 library("tidyr")
-# library("Rphenograph")
+library("flowFP")
 library("FlowSOM")
+# for flowEMMI
+library("Rcpp")
+library("RcppEigen")
+library("mixtools")
+library("gtools")
+library("flowCore")
+library("flowViz")
+library("randomcoloR")
+sourceCpp("ext/flowEMMi.cpp")
 
 # Set seed for reproducible analysis
 set.seed(777)
@@ -224,16 +233,16 @@ ChExcludeFM <-
   colnames(flowData_transformed_asinh)[!colnames(flowData_transformed_asinh) %in% param]
 
 # Use flowAI for removing anomalies from the data
-flowData_transformed_asinh_dn <- run_quiet(flow_auto_qc(flowData_transformed_asinh, 
-  output = 1,
-  folder_results = "./data/QC_flowAI",
-  ChExcludeFM = ChExcludeFM,
-  timeCh = "TIME",
-  second_fractionFR = "timestep"
-  )
-)
+# flowData_transformed_asinh_dn <- run_quiet(flow_auto_qc(flowData_transformed_asinh, 
+#   output = 1,
+#   folder_results = "./data/QC_flowAI",
+#   ChExcludeFM = ChExcludeFM,
+#   timeCh = "TIME",
+#   second_fractionFR = "timestep"
+#   )
+# )
 
-# flowData_transformed_asinh_dn <- read.flowSet(path = "./data/QC_flowAI", pattern = "_QC.fcs")
+flowData_transformed_asinh_dn <- read.flowSet(path = "./data/QC_flowAI", pattern = "_QC.fcs")
 ```
 
 ### After flowAI 
@@ -296,7 +305,7 @@ volumetric measurement.
 ## FlowSOM - fig1
 ```{r, include=TRUE, cache = TRUE, cache.lazy = TRUE, dpi = 500}
 fSOM <- FlowSOM(
-  input = flowData_transformed_asinh[1:3],
+  input = flowData_transformed_asinh_dn[1:3],
   # Input options:
   compensate = FALSE,
   transform = FALSE,
@@ -319,6 +328,27 @@ PlotMarker(fSOM[[1]], param[3])
 # Cytometric fingerprinting
 
 ```{r, include=TRUE}
+fp_x <- flowFPModel(fcs = FCS_resample(flowData_transformed_asinh_dn, 1e3), parameters = param,
+  nRecursions = 8)
+
+# fp_x <- flowBasis(FCS_resample(flowData_transformed_asinh_dn, 1e3), param = param, nbin = 128)
+
+# flowEMMi_res <-
+#   flowEMMi(
+#     frame = flowData_transformed_asinh_dn[[1]],
+#     ch1 = param[1],
+#     ch2 = param[3],
+#     sample_size = 1,
+#     prior = FALSE,
+#     separation = TRUE,
+#     max_inits = 10,
+#     use_log = FALSE,
+#     alpha = .7,
+#     img_format = "png",
+#     foreground_maxsd = 5000,
+#     start_cluster = 2,
+#     end_cluster = 20
+#   )
 
 ```
 
