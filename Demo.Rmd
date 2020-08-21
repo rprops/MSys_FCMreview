@@ -325,15 +325,23 @@ PlotStars(fSOM[[1]], backgroundValues = as.factor(fSOM[[2]]))
 PlotMarker(fSOM[[1]], param[3])
 ```
 
-# Cytometric fingerprinting
+# Cytometric fingerprinting {.tabset}
+
+## FlowFP
 
 ```{r, include=TRUE}
-fp_x <- flowFPModel(fcs = FCS_resample(flowData_transformed_asinh_dn, 1e3), parameters = param,
-  nRecursions = 8)
+# fp_FP <-
+#   flowFPModel(
+#     fcs = FCS_resample(flowData_transformed_asinh_dn, 1e3),
+#     param = param,
+#     nRecursions = 8
+#   )
+```
 
-# fp_x <- flowBasis(FCS_resample(flowData_transformed_asinh_dn, 1e3), param = param, nbin = 128)
+## FlowEMMi
 
-# flowEMMi_res <-
+```{r, include=TRUE}
+# fp_emmi <-
 #   flowEMMi(
 #     frame = flowData_transformed_asinh_dn[[1]],
 #     ch1 = param[1],
@@ -347,9 +355,62 @@ fp_x <- flowFPModel(fcs = FCS_resample(flowData_transformed_asinh_dn, 1e3), para
 #     img_format = "png",
 #     foreground_maxsd = 5000,
 #     start_cluster = 2,
-#     end_cluster = 20
+#     end_cluster = 12
 #   )
+```
 
+## PhenoGMM
+
+```{r, include=TRUE}
+fp_gmm <-
+  PhenoGMM(
+    flowData_transformed_asinh_dn,
+    param = param,
+    downsample = 1e2,
+    auto_nG = TRUE,
+    nG = 32,
+    diagnostic_plot = TRUE
+  )
+
+```
+
+## PhenoFlow
+
+```{r, include=TRUE}
+# Summary of max intensity values across data set
+summary <-
+  fsApply(
+    x = flowData_transformed_asinh_dn,
+    FUN = function(x)
+      apply(x, 2, max),
+    use.exprs = TRUE
+  )
+maxval <- max(summary[, "FL 4 Log"])
+
+# Normalize intensities to [0,1] range for density estimation
+mytrans <- function(x)
+  x / maxval
+flowData_transformed_asinh_dn_trans <-
+  transform(
+    flowData_transformed_asinh_dn,
+    `FS Log` = mytrans(`FS Log`),
+    `SS Log` = mytrans(`SS Log`),
+    `FL 4 Log` = mytrans(`FL 4 Log`)
+  )
+
+# Estimate kernel densities across grids
+fp_grid <-
+  flowBasis(
+    FCS_resample(flowData_transformed_asinh_dn_trans, 1e3),
+    param = param,
+    nbin = 128
+  )
+
+# Perform ordination analysis
+beta_fp <- beta_div_fcm(x = fp_grid, ord.type = "PCoA")
+
+# Plot results
+plot_beta_fcm(x = beta_fp)
 ```
 
 # Conclusions
