@@ -45,7 +45,26 @@ library("grid")
 library("tidyr")
 library("flowFP")
 library("FlowSOM")
+library("readxl")
+# for flowEMMI
+library("Rcpp")
+library("RcppEigen")
+library("mixtools")
+library("gtools")
+library("flowCore")
+library("flowViz")
+library("randomcoloR")
+sourceCpp("ext/flowEMMi.cpp")
+```
 
+```
+## 
+## > flowEMMi <- function(frame, ch1 = "FS.Log", ch2 = "FL.4.Log", 
+## +     use_log = TRUE, diff.ll = 1, sample_size = 10, start_cluster = 8, 
+## +     end_cl .... [TRUNCATED]
+```
+
+```r
 # Set seed for reproducible analysis
 set.seed(777)
 
@@ -55,11 +74,25 @@ run_quiet <- function (x) {
   on.exit(sink())
   invisible(force(x))
 }
+
+# Import metadata
+metadata <- readxl::read_excel("./metadata.xlsx")
+metadata$Sample_names <- gsub(".5", "_5", metadata$Sample_names, fixed = TRUE)
+metadata$Sample_names <- gsub(".fcs", "_QC.fcs", metadata$Sample_names, fixed = TRUE)
+metadata$Treatment <- factor(metadata$Treatment,
+                             levels = c("Adaptation of AMC",
+                                        "AMC after temperature disturbance",
+                                        "AMC after pH disturbance",
+                                        "Adaptation of CMC",
+                                        "CMC after temperature disturbance",
+                                        "CMC after pH disturbance"))
 ```
 
 # Preprocessing
 
 ## Import data 
+
+Data set from [Liu et al (2017).](https://msphere.asm.org/content/3/1/e00564-17)
 
 
 ```r
@@ -292,8 +325,8 @@ cowplot::plot_grid(p_qc1, p_qc2, align = "hv", ncol = 1)
 
 # Cell density measurement
 
-Cell concentration cannot be estimated for this dataset due to lack of 
-volumetric measurement.
+Cell concentration estimates cannot be easily estimated for this dataset due to 
+a lack of volumetric measurements. We refer the reader to the original manuscript.
 
 
 
@@ -328,49 +361,155 @@ PlotMarker(fSOM[[1]], param[3])
 
 <img src="./Figures/unnamed-chunk-15-1.png" style="display: block; margin: auto;" />
 
-# Cytometric fingerprinting
+# Cytometric fingerprinting {.tabset}
+
+## PhenoGMM
 
 
 ```r
-fp_x <- flowFPModel(fcs = flowData_transformed_asinh_dn, parameters = param,
-  nRecursions = 8, sampleSize = 1e3, name = "Fingerprint")
+fp_gmm <-
+  PhenoGMM(
+    flowData_transformed_asinh_dn,
+    param = param,
+    downsample = 1e2,
+    auto_nG = TRUE,
+    nG = 32,
+    diagnostic_plot = TRUE
+  )
 ```
 
 ```
-## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
-## model@split_axis[[level]], : converting NULL pointer to R NULL
-
-## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
-## model@split_axis[[level]], : converting NULL pointer to R NULL
-
-## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
-## model@split_axis[[level]], : converting NULL pointer to R NULL
-
-## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
-## model@split_axis[[level]], : converting NULL pointer to R NULL
-
-## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
-## model@split_axis[[level]], : converting NULL pointer to R NULL
-
-## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
-## model@split_axis[[level]], : converting NULL pointer to R NULL
-
-## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
-## model@split_axis[[level]], : converting NULL pointer to R NULL
-
-## Warning in .Call("bin_level", fcs@exprs, model@.tmp_tags,
-## model@split_axis[[level]], : converting NULL pointer to R NULL
+## Your samples range between 235367 and 249862 cells
+## Your samples were randomly subsampled to 100 cells
 ```
 
 ```r
-plot(fp_x)
+# Calculate diversity indices
+div_gmm <- Diversity_gmm(fp_gmm, R = 10)
 ```
 
-<img src="./Figures/unnamed-chunk-16-1.png" style="display: block; margin: auto;" />
+```
+## Thu Sep 03 12:44:17 2020 	Done with all 140 samples
+```
 
-# Conclusions
+```r
+# Merge with metadata
+div_gmm <- left_join(div_gmm, metadata, by = "Sample_names")
+```
 
 
+```r
+# Plot results
+div_gmm %>% 
+  ggplot(., aes(x = Timepoint,  y = D2, fill = Treatment))+
+  geom_point(shape = 21, size = 4)+
+  geom_line()+
+  facet_wrap(.~Treatment, scales = "free_x", ncol = 3)+
+  scale_fill_brewer("", palette = "Accent")+
+  theme_bw()+
+  theme(strip.text = element_text(size = 8))+
+  labs(y = "Hill diversity index (D2)")
+```
+
+<img src="./Figures/unnamed-chunk-17-1.png" style="display: block; margin: auto;" />
+
+## PhenoFlow
+
+
+```r
+# Summary of max intensity values across data set
+summary <-
+  fsApply(
+    x = flowData_transformed_asinh_dn,
+    FUN = function(x)
+      apply(x, 2, max),
+    use.exprs = TRUE
+  )
+maxval <- max(summary[, "FL 4 Log"])
+
+# Normalize intensities to [0,1] range for density estimation
+mytrans <- function(x)
+  x / maxval
+flowData_transformed_asinh_dn_trans <-
+  transform(
+    flowData_transformed_asinh_dn,
+    `FS Log` = mytrans(`FS Log`),
+    `SS Log` = mytrans(`SS Log`),
+    `FL 4 Log` = mytrans(`FL 4 Log`)
+  )
+
+# Estimate kernel densities across grids
+fp_grid <-
+  flowBasis(
+    FCS_resample(flowData_transformed_asinh_dn_trans, 1e3),
+    param = param,
+    nbin = 128
+  )
+```
+
+```
+## Your samples range between 235367 and 249862 cells
+## Your samples were randomly subsampled to 1000 cells
+```
+
+```r
+# Perform ordination analysis
+beta_fp <- beta_div_fcm(x = fp_grid, ord.type = "PCoA")
+beta_fp <- data.frame(Sample_names = rownames(beta_fp$points), beta_fp$points)
+beta_fp <- left_join(beta_fp, metadata, by = "Sample_names")
+```
+
+
+```r
+# Plot results
+beta_fp %>% 
+  ggplot(., aes(x = X1,  y = X2, fill = Treatment))+
+  geom_point(shape = 21, size = 4)+
+  # facet_wrap(.~Treatment, ncol = 3)+
+  scale_fill_brewer("", palette = "Accent")+
+  theme_bw()+
+  labs(x = "PCoA 1", y = "PCoA 2")+
+  theme(strip.text = element_text(size = 8))
+```
+
+<img src="./Figures/unnamed-chunk-19-1.png" style="display: block; margin: auto;" />
+
+## FlowFP
+
+FlowFP does not seem to run in the current R and RStudio version. Example code
+below in any case.
+
+
+```r
+# fp_FP <-
+#   flowFPModel(
+#     fcs = FCS_resample(flowData_transformed_asinh_dn, 1e3),
+#     param = param,
+#     nRecursions = 8
+#   )
+```
+
+## FlowEMMi
+
+
+```r
+# fp_emmi <-
+#   flowEMMi(
+#     frame = flowData_transformed_asinh_dn[[1]],
+#     ch1 = param[1],
+#     ch2 = param[3],
+#     sample_size = 1,
+#     prior = FALSE,
+#     separation = TRUE,
+#     max_inits = 10,
+#     use_log = FALSE,
+#     alpha = .7,
+#     img_format = "png",
+#     foreground_maxsd = 5000,
+#     start_cluster = 2,
+#     end_cluster = 12
+#   )
+```
 
 # Session info
 
@@ -396,71 +535,76 @@ sessionInfo()
 ## [8] base     
 ## 
 ## other attached packages:
-##  [1] FlowSOM_1.20.0            igraph_1.2.5             
-##  [3] tidyr_1.1.0               RColorBrewer_1.1-2       
-##  [5] ggcyto_1.16.0             flowWorkspace_4.0.6      
-##  [7] ncdfFlow_2.34.0           BH_1.72.0-3              
-##  [9] RcppArmadillo_0.9.900.2.0 cowplot_1.0.0            
-## [11] scales_1.1.1              ggplot2_3.3.2            
-## [13] dplyr_1.0.0               plyr_1.8.6               
-## [15] Phenoflow_1.1.2           foreach_1.5.0            
-## [17] flowAI_1.18.5             flowFDA_0.99             
-## [19] mclust_5.4.6              multcomp_1.4-13          
-## [21] TH.data_1.0-10            MASS_7.3-51.6            
-## [23] survival_3.2-3            mvtnorm_1.1-1            
-## [25] flowFP_1.46.0             flowViz_1.52.0           
-## [27] lattice_0.20-41           flowClean_1.26.0         
-## [29] flowCore_2.0.1           
+##  [1] randomcoloR_1.1.0.1       gtools_3.8.2             
+##  [3] mixtools_1.2.0            RcppEigen_0.3.3.7.0      
+##  [5] Rcpp_1.0.5                readxl_1.3.1             
+##  [7] FlowSOM_1.20.0            igraph_1.2.5             
+##  [9] tidyr_1.1.1               RColorBrewer_1.1-2       
+## [11] ggcyto_1.16.0             flowWorkspace_4.0.6      
+## [13] ncdfFlow_2.34.0           BH_1.72.0-3              
+## [15] RcppArmadillo_0.9.900.2.0 cowplot_1.0.0            
+## [17] scales_1.1.1              ggplot2_3.3.2            
+## [19] dplyr_1.0.1               plyr_1.8.6               
+## [21] Phenoflow_1.1.2           foreach_1.5.0            
+## [23] flowAI_1.18.5             flowFDA_0.99             
+## [25] mclust_5.4.6              multcomp_1.4-13          
+## [27] TH.data_1.0-10            MASS_7.3-51.6            
+## [29] survival_3.2-3            mvtnorm_1.1-1            
+## [31] flowFP_1.46.0             flowViz_1.52.0           
+## [33] lattice_0.20-41           flowClean_1.26.0         
+## [35] flowCore_2.0.1           
 ## 
 ## loaded via a namespace (and not attached):
-##  [1] colorspace_1.4-1            ellipsis_0.3.1             
-##  [3] class_7.3-17                cytolib_2.0.3              
-##  [5] XVector_0.28.0              base64enc_0.1-3            
-##  [7] farver_2.0.3                hexbin_1.28.1              
-##  [9] IDPmisc_1.1.20              CytoML_2.0.5               
-## [11] prodlim_2019.11.13          lubridate_1.7.9            
-## [13] xml2_1.3.2                  codetools_0.2-16           
-## [15] splines_4.0.1               knitr_1.29                 
-## [17] ade4_1.7-15                 jsonlite_1.7.0             
-## [19] phyloseq_1.32.0             pROC_1.16.2                
-## [21] caret_6.0-86                cluster_2.1.0              
-## [23] png_0.1-7                   sfsmisc_1.1-7              
-## [25] graph_1.66.0                compiler_4.0.1             
-## [27] Matrix_1.2-18               htmltools_0.5.0            
-## [29] tools_4.0.1                 gtable_0.3.0               
-## [31] glue_1.4.1                  reshape2_1.4.4             
-## [33] Rcpp_1.0.5                  Biobase_2.48.0             
-## [35] vctrs_0.3.2                 Biostrings_2.56.0          
-## [37] multtest_2.44.0             ape_5.4                    
-## [39] nlme_3.1-148                iterators_1.0.12           
-## [41] changepoint_2.2.2           timeDate_3043.102          
-## [43] gower_0.2.2                 xfun_0.16                  
-## [45] stringr_1.4.0               lifecycle_0.2.0            
-## [47] XML_3.99-0.5                zlibbioc_1.34.0            
-## [49] zoo_1.8-8                   ipred_0.9-9                
-## [51] RProtoBufLib_2.0.0          RBGL_1.64.0                
-## [53] parallel_4.0.1              biomformat_1.16.0          
-## [55] sandwich_2.5-1              rhdf5_2.32.2               
-## [57] yaml_2.2.1                  gridExtra_2.3              
-## [59] rpart_4.1-15                latticeExtra_0.6-29        
-## [61] stringi_1.4.6               S4Vectors_0.26.1           
-## [63] permute_0.9-5               BiocGenerics_0.34.0        
-## [65] boot_1.3-25                 lava_1.6.7                 
-## [67] rlang_0.4.7                 pkgconfig_2.0.3            
-## [69] matrixStats_0.56.0          evaluate_0.14              
-## [71] purrr_0.3.4                 Rhdf5lib_1.10.1            
-## [73] labeling_0.3                recipes_0.1.13             
-## [75] bit_1.1-15.2                tidyselect_1.1.0           
-## [77] magrittr_1.5                R6_2.4.1                   
-## [79] IRanges_2.22.2              generics_0.0.2             
-## [81] pillar_1.4.6                withr_2.2.0                
-## [83] mgcv_1.8-31                 nnet_7.3-14                
-## [85] tsne_0.1-3                  tibble_3.0.3               
-## [87] crayon_1.3.4                KernSmooth_2.23-17         
-## [89] rmarkdown_2.3               jpeg_0.1-8.1               
-## [91] data.table_1.13.0           vegan_2.5-6                
-## [93] Rgraphviz_2.32.0            ConsensusClusterPlus_1.52.0
-## [95] ModelMetrics_1.2.2.2        digest_0.6.25              
-## [97] RcppParallel_5.0.2          stats4_4.0.1               
-## [99] munsell_0.5.0
+##   [1] changepoint_2.2.2           ConsensusClusterPlus_1.52.0
+##   [3] splines_4.0.1               digest_0.6.25              
+##   [5] htmltools_0.5.0             magrittr_1.5               
+##   [7] CytoML_2.0.5                cluster_2.1.0              
+##   [9] sfsmisc_1.1-7               recipes_0.1.13             
+##  [11] Biostrings_2.56.0           gower_0.2.2                
+##  [13] RcppParallel_5.0.2          matrixStats_0.56.0         
+##  [15] sandwich_2.5-1              cytolib_2.0.3              
+##  [17] jpeg_0.1-8.1                colorspace_1.4-1           
+##  [19] xfun_0.16                   crayon_1.3.4               
+##  [21] jsonlite_1.7.0              hexbin_1.28.1              
+##  [23] graph_1.66.0                zoo_1.8-8                  
+##  [25] iterators_1.0.12            ape_5.4                    
+##  [27] glue_1.4.1                  gtable_0.3.0               
+##  [29] ipred_0.9-9                 zlibbioc_1.34.0            
+##  [31] XVector_0.28.0              V8_3.2.0                   
+##  [33] phyloseq_1.32.0             kernlab_0.9-29             
+##  [35] IDPmisc_1.1.20              Rgraphviz_2.32.0           
+##  [37] Rhdf5lib_1.10.1             BiocGenerics_0.34.0        
+##  [39] bit_4.0.4                   stats4_4.0.1               
+##  [41] tsne_0.1-3                  lava_1.6.7                 
+##  [43] prodlim_2019.11.13          ellipsis_0.3.1             
+##  [45] farver_2.0.3                pkgconfig_2.0.3            
+##  [47] XML_3.99-0.5                nnet_7.3-14                
+##  [49] caret_6.0-86                labeling_0.3               
+##  [51] tidyselect_1.1.0            rlang_0.4.7                
+##  [53] reshape2_1.4.4              munsell_0.5.0              
+##  [55] cellranger_1.1.0            tools_4.0.1                
+##  [57] generics_0.0.2              ade4_1.7-15                
+##  [59] evaluate_0.14               biomformat_1.16.0          
+##  [61] stringr_1.4.0               yaml_2.2.1                 
+##  [63] ModelMetrics_1.2.2.2        knitr_1.29                 
+##  [65] purrr_0.3.4                 RBGL_1.64.0                
+##  [67] nlme_3.1-148                xml2_1.3.2                 
+##  [69] compiler_4.0.1              curl_4.3                   
+##  [71] png_0.1-7                   tibble_3.0.3               
+##  [73] stringi_1.4.6               Matrix_1.2-18              
+##  [75] vegan_2.5-6                 permute_0.9-5              
+##  [77] multtest_2.44.0             vctrs_0.3.2                
+##  [79] pillar_1.4.6                lifecycle_0.2.0            
+##  [81] data.table_1.13.0           R6_2.4.1                   
+##  [83] latticeExtra_0.6-29         KernSmooth_2.23-17         
+##  [85] gridExtra_2.3               RProtoBufLib_2.0.0         
+##  [87] IRanges_2.22.2              codetools_0.2-16           
+##  [89] boot_1.3-25                 rhdf5_2.32.2               
+##  [91] withr_2.2.0                 S4Vectors_0.26.1           
+##  [93] mgcv_1.8-31                 parallel_4.0.1             
+##  [95] rpart_4.1-15                timeDate_3043.102          
+##  [97] class_7.3-17                rmarkdown_2.3              
+##  [99] segmented_1.2-0             Rtsne_0.15                 
+## [101] pROC_1.16.2                 Biobase_2.48.0             
+## [103] lubridate_1.7.9             base64enc_0.1-3
 ```

@@ -57,6 +57,7 @@ library("grid")
 library("tidyr")
 library("flowFP")
 library("FlowSOM")
+library("readxl")
 # for flowEMMI
 library("Rcpp")
 library("RcppEigen")
@@ -76,11 +77,25 @@ run_quiet <- function (x) {
   on.exit(sink())
   invisible(force(x))
 }
+
+# Import metadata
+metadata <- readxl::read_excel("./metadata.xlsx")
+metadata$Sample_names <- gsub(".5", "_5", metadata$Sample_names, fixed = TRUE)
+metadata$Sample_names <- gsub(".fcs", "_QC.fcs", metadata$Sample_names, fixed = TRUE)
+metadata$Treatment <- factor(metadata$Treatment,
+                             levels = c("Adaptation of AMC",
+                                        "AMC after temperature disturbance",
+                                        "AMC after pH disturbance",
+                                        "Adaptation of CMC",
+                                        "CMC after temperature disturbance",
+                                        "CMC after pH disturbance"))
 ```
 
 # Preprocessing
 
 ## Import data 
+
+Data set from [Liu et al (2017).](https://msphere.asm.org/content/3/1/e00564-17)
 
 ```{r, include = TRUE, cache = TRUE, cache.lazy = FALSE}
 # Import data
@@ -293,8 +308,8 @@ cowplot::plot_grid(p_qc1, p_qc2, align = "hv", ncol = 1)
 
 # Cell density measurement
 
-Cell concentration cannot be estimated for this dataset due to lack of 
-volumetric measurement.
+Cell concentration estimates cannot be easily estimated for this dataset due to 
+a lack of volumetric measurements. We refer the reader to the original manuscript.
 
 ```{r, include=TRUE}
 
@@ -327,41 +342,9 @@ PlotMarker(fSOM[[1]], param[3])
 
 # Cytometric fingerprinting {.tabset}
 
-## FlowFP
-
-```{r, include=TRUE}
-# fp_FP <-
-#   flowFPModel(
-#     fcs = FCS_resample(flowData_transformed_asinh_dn, 1e3),
-#     param = param,
-#     nRecursions = 8
-#   )
-```
-
-## FlowEMMi
-
-```{r, include=TRUE}
-# fp_emmi <-
-#   flowEMMi(
-#     frame = flowData_transformed_asinh_dn[[1]],
-#     ch1 = param[1],
-#     ch2 = param[3],
-#     sample_size = 1,
-#     prior = FALSE,
-#     separation = TRUE,
-#     max_inits = 10,
-#     use_log = FALSE,
-#     alpha = .7,
-#     img_format = "png",
-#     foreground_maxsd = 5000,
-#     start_cluster = 2,
-#     end_cluster = 12
-#   )
-```
-
 ## PhenoGMM
 
-```{r, include=TRUE}
+```{r, include=TRUE, dpi = 500}
 fp_gmm <-
   PhenoGMM(
     flowData_transformed_asinh_dn,
@@ -372,11 +355,30 @@ fp_gmm <-
     diagnostic_plot = TRUE
   )
 
+# Calculate diversity indices
+div_gmm <- Diversity_gmm(fp_gmm, R = 10)
+
+# Merge with metadata
+div_gmm <- left_join(div_gmm, metadata, by = "Sample_names")
+```
+
+```{r, include=TRUE, dpi = 500, fig.width = 10, fig.height = 5}
+# Plot results
+div_gmm %>% 
+  ggplot(., aes(x = Timepoint,  y = D2, fill = Treatment))+
+  geom_point(shape = 21, size = 4)+
+  geom_line()+
+  facet_wrap(.~Treatment, scales = "free_x", ncol = 3)+
+  scale_fill_brewer("", palette = "Accent")+
+  theme_bw()+
+  theme(strip.text = element_text(size = 8))+
+  labs(y = "Hill diversity index (D2)")
+
 ```
 
 ## PhenoFlow
 
-```{r, include=TRUE}
+```{r, include=TRUE, dpi = 500}
 # Summary of max intensity values across data set
 summary <-
   fsApply(
@@ -408,15 +410,55 @@ fp_grid <-
 
 # Perform ordination analysis
 beta_fp <- beta_div_fcm(x = fp_grid, ord.type = "PCoA")
-
-# Plot results
-plot_beta_fcm(x = beta_fp)
+beta_fp <- data.frame(Sample_names = rownames(beta_fp$points), beta_fp$points)
+beta_fp <- left_join(beta_fp, metadata, by = "Sample_names")
 ```
 
-# Conclusions
+```{r, include=TRUE, dpi = 500, fig.width = 8, fig.height = 5}
+# Plot results
+beta_fp %>% 
+  ggplot(., aes(x = X1,  y = X2, fill = Treatment))+
+  geom_point(shape = 21, size = 4)+
+  # facet_wrap(.~Treatment, ncol = 3)+
+  scale_fill_brewer("", palette = "Accent")+
+  theme_bw()+
+  labs(x = "PCoA 1", y = "PCoA 2")+
+  theme(strip.text = element_text(size = 8))
+```
+
+## FlowFP
+
+FlowFP does not seem to run in the current R and RStudio version. Example code
+below in any case.
 
 ```{r, include=TRUE}
+# fp_FP <-
+#   flowFPModel(
+#     fcs = FCS_resample(flowData_transformed_asinh_dn, 1e3),
+#     param = param,
+#     nRecursions = 8
+#   )
+```
 
+## FlowEMMi
+
+```{r, include=TRUE}
+# fp_emmi <-
+#   flowEMMi(
+#     frame = flowData_transformed_asinh_dn[[1]],
+#     ch1 = param[1],
+#     ch2 = param[3],
+#     sample_size = 1,
+#     prior = FALSE,
+#     separation = TRUE,
+#     max_inits = 10,
+#     use_log = FALSE,
+#     alpha = .7,
+#     img_format = "png",
+#     foreground_maxsd = 5000,
+#     start_cluster = 2,
+#     end_cluster = 12
+#   )
 ```
 
 # Session info
